@@ -2,42 +2,56 @@
 unset PATH
 
 # S3 VARIABLES
-S3BUCKET=downy-bucket # S3 Bucket name
+S3BUCKET=backup # S3 Bucket name
 
 # LOCATION TO STORE BACKUPS WHILE PROCESSING
-BACKUPDIR=/home/deploy/backup
+BACKUPDIR=/home/deploy/
 
-# FILES TO BACKUP
-APPDATA=/home/deploy/downy
+# APACHE FILES TO BACKUP
+DATA=/home/deploy/data
 
 # PATH VARIABLES
 MK=/bin/mkdir;
 TAR=/bin/tar;
 GZ=/bin/gzip;
 RM=/bin/rm;
-FIND=/usr/bin/find;
 DATE=/bin/date;
+FIND=/usr/bin/find;
 S3CMD=/usr/bin/s3cmd
-MYSQLDUMP=/usr/bin/mysqldump 
+SPLIT=/usr/bin/split
+LS=/bin/ls
 
 # OTHER VARIABLES
-NOW=$($DATE +%d%m%y);
+NOW=$($DATE +_%b_%d_%y);
+SPLITDIR=$BACKUPDIR$NOW/split
 
-# MYSQL CREDENTIAL
-SQLROOTPASS='63R5W~8Ej&,!_85'
-SQLDB=downy_pro
+#REMOVE EXISTING BACKUP DIRECTORY
+$RM -Rf $BACKUPDIR$NOW
 
-# FILE BACKUP APPDATA
-$TAR czvf $BACKUPDIR/application_backup_$NOW.tar.gz $APPDATA
+# Create new backup dir
+$MK $BACKUPDIR$NOW
 
-# FILE BACKUP MYSQLDATA
-$MYSQLDUMP -uroot -p$SQLROOTPASS $SQLDB | $GZ > $BACKUPDIR/mysql_backup_$NOW.sql.gz
+#REMOVE EXISTING SPLIT DIRECTORY
+$RM -Rf $SPLITDIR
 
-# UPLOAD APPDATA TO S3
-$S3CMD put $BACKUPDIR/application_backup_$NOW.tar.gz s3://$S3BUCKET/application_backup_$NOW.tar.gz
+# Create new SPLIT dir
+$MK $SPLITDIR
 
-# UPLOAD MYSQLDATA TO S3
-$S3CMD put $BACKUPDIR/mysql_backup_$NOW.sql.gz s3://$S3BUCKET/mysql_backup_$NOW.sql.gz
+# FILE BACKUP
+$TAR -czf $BACKUPDIR$NOW/backup$NOW.tar.gz $DATA --exclude 'media/*' --exclude 'media'
 
-# FIND BACKUPDATA AND DELETE
-$FIND $BACKUPDIR -type f -name '*.gz' -mtime 1 -exec $RM {} \;
+#for i in $($FIND $DATA/* -maxdepth 0 -type d -printf '%f\n'); do
+#   $TAR -czf $BACKUPDIR$NOW/data_$i.tar.gz $DATA/$i;
+#done
+
+# split file each 1GB
+$SPLIT -b1000m $BACKUPDIR$NOW/backup$NOW.tar.gz $SPLITDIR/backup$NOW.tar.gz-
+
+FOLDER=$($DATE +%Y%m%d)
+# upload each file split to s3
+for split in $($LS $SPLITDIR); do
+  $S3CMD put $SPLITDIR/$split s3://$S3BUCKET/backup_$FOLDER/$split
+done
+
+# Remove backup directory
+$RM -Rf $BACKUPDIR$NOW
